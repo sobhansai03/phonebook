@@ -1,7 +1,10 @@
+require("dotenv").config();
 const { request, response } = require("express");
 const express = require("express");
+const Person = require("./models/person");
 var morgan = require("morgan");
 const app = express();
+const port = process.env.PORT;
 
 app.use(express.static("build"));
 
@@ -18,86 +21,94 @@ app.use(cors());
 
 app.use(express.json());
 
-let persons = [
-    {
-        id: 1,
-        name: "Arto Hellas",
-        number: "040-123456",
-    },
-    {
-        id: 2,
-        name: "Ada Lovelace",
-        number: "39-44-5165165",
-    },
-    {
-        id: 3,
-        name: "Dan Abramov",
-        number: "12-43-659876",
-    },
-    {
-        id: 4,
-        name: "snc cjbcu",
-        number: "12-258259876",
-    },
-];
-
-app.get("/api/persons", (request, response) => {
-    response.json(persons);
+app.get("/info", (req, res) => {
+    Person.find({})
+        .then((people) => (people ? people.length : 0))
+        .then((entries) => {
+            const currentTime = new Date();
+            const text = `
+          <p>Phonebook has info for ${entries} people</p>
+          <p>${currentTime}</p>
+        `;
+            res.send(text);
+        });
 });
 
-app.get("/info", (request, response) => {
-    const currentTime = new Date();
-    const text = `<div>
-        <p>Phonebook has info for ${persons.length} people</p>
-        <p>${currentTime}</p>
-    </div>`;
-    response.send(text);
+app.get("/api/persons", (req, res) => {
+    Person.find({}).then((people) => {
+        res.json(people);
+    });
 });
 
-app.get("/api/persons/:id", (request, response) => {
-    const id = Number(request.params.id);
-    const person = persons.find((person) => person.id === id);
-    if (person) {
-        response.json(person);
-    } else {
-        response.status(404).end();
-    }
+app.get("/api/persons/:id", (req, res, next) => {
+    Person.findById(req.params.id)
+        .then((person) => {
+            person ? res.json(person) : res.status(404).end();
+        })
+        .catch((error) => next(error));
 });
 
-app.delete("/api/persons/:id", (request, response) => {
-    const id = Number(request.params.id);
-    persons = persons.filter((person) => person.id !== id);
-
-    response.status(204).end();
+app.delete("/api/persons/:id", (req, res, next) => {
+    Person.findByIdAndRemove(req.params.id)
+        .then((personToRemove) => {
+            personToRemove ? res.status(204).end() : res.status(404).end();
+        })
+        .catch((error) => next(error));
 });
 
-const generateId = () => {
-    return Math.floor(Math.random() * Math.random() * 100);
-};
+app.post("/api/persons/", (req, res, next) => {
+    const { name, number } = req.body;
 
-app.post("/api/persons", (request, response) => {
-    const { name, number } = request.body;
     if (!name || !number) {
-        return response.status(400).json({ error: "missing name or number" });
+        return res.status(400).json({ error: "missing name or number" });
     }
 
-    person1 = persons.filter((person) => person.name === name);
-    if (person1.length > 0) {
-        return response.status(400).json({ error: "name must be unique" });
-    }
+    const person = new Person({
+        name,
+        number,
+    });
+
+    person
+        .save()
+        .then((savedPerson) => {
+            res.json(savedPerson);
+        })
+        .catch((error) => next(error));
+});
+
+app.put("/api/persons/:id", (req, res, next) => {
+    const { name, number } = req.body;
 
     const person = {
-        id: generateId(),
-        name: name,
-        number: number,
+        name,
+        number,
     };
 
-    persons = persons.concat(person);
-
-    response.json(persons);
+    Person.findByIdAndUpdate(req.params.id, person, { new: true })
+        .then((updatedPerson) => {
+            res.json(updatedPerson);
+        })
+        .catch((error) => next(error));
 });
 
-const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+const unknownEndpoint = (req, res) => {
+    res.status(404).json({ error: "requested resource cannot be found" });
+};
+app.use(unknownEndpoint);
+
+const errorHandler = (error, req, res, next) => {
+    console.error("Error:", error.message);
+
+    if (error.name === "CastError" && error.kind === "ObjectId") {
+        return res.status(400).json({ error: "malformatted id" });
+    } else if (error.name === "ValidationError") {
+        return res.status(400).json({ error: error.message });
+    }
+
+    next(error);
+};
+app.use(errorHandler);
+
+app.listen(port, () => {
+    console.log(`Phonebook backend running on port ${port}`);
 });
